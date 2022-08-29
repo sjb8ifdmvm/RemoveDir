@@ -1,74 +1,105 @@
 #include <Windows.h>
-#include <tchar.h> 
-#include <strsafe.h>
+#include <tchar.h>
 
-#ifdef DEBUG
-#include <locale>
-#endif // DEBUG
+void WINAPI DeleteDir(const PCWCHAR dir);
 
-void DeleteDir(TCHAR* dir);
-void DeleteDir(TCHAR* dir, unsigned int deleteParent);
-
-int _tmain(int argc, TCHAR* argv[])
+int _tmain(int argc, PCWCHAR argv[])
 {
-    if (argc != 2)
+    int iArgCount = 0;
+    PWCHAR* t_CommandLinePtrPtr = nullptr;
+    __try
     {
-        _tprintf(TEXT("\nUsage: %s <folder>\n"), argv[0]);
-        return 1;
+        __try
+        {
+            t_CommandLinePtrPtr = ::CommandLineToArgvW(::GetCommandLineW(), &iArgCount);
+            if (t_CommandLinePtrPtr == NULL)
+                __leave;
+            if (iArgCount > 2)
+                __leave;
+            ::DeleteDir(t_CommandLinePtrPtr[1]);
+        }
+        __finally
+        {
+            if (t_CommandLinePtrPtr != NULL)
+                ::LocalFree(t_CommandLinePtrPtr);
+            t_CommandLinePtrPtr;
+        }
     }
-#ifdef DEBUG
-    setlocale(LC_CTYPE, "");
-#endif // DEBUG
+    __except (1)
+    {
 
-    DeleteDir(argv[1]);
-
+    }
     return 0;
 }
 
-void DeleteDir(TCHAR* dir)
+void WINAPI DeleteDir(const PCWCHAR p_PathPtr)
 {
-    DeleteDir(dir, 1);
-}
+    size_t t_szAllocLen = 0;
+    PWCHAR t_FileNamePtr = NULL;
+    PWCHAR t_PosPtr = NULL;
+    ::WIN32_FIND_DATAW t_FindFileData;
+    HANDLE t_hFindHandle = INVALID_HANDLE_VALUE;
 
-void DeleteDir(TCHAR* dir, unsigned int DeleteRootPath)
-{
-    TCHAR szDir[MAX_PATH]{ 0 }; 
-    StringCchCopy(szDir, MAX_PATH, dir);
-    StringCchCat(szDir, MAX_PATH, L"\\*.*"); //EX: dir\*.*
-
-    WIN32_FIND_DATAW wFindFileData;
-    HANDLE hFind = FindFirstFileW(szDir, &wFindFileData);
-
-    if (hFind == INVALID_HANDLE_VALUE)
-        return;
-
-    do
+    __try
     {
-        if (wFindFileData.cFileName[0] == L'.')//忽略系統目錄
-            continue;
+        if ((p_PathPtr == NULL) || (p_PathPtr[0] == NULL))
+            __leave;
+        ::ZeroMemory(&t_FindFileData, sizeof(::WIN32_FIND_DATAW));
 
-        TCHAR szFile[MAX_PATH];
-        StringCchCopy(szFile, MAX_PATH, dir);//EX: dir\*.*
-        StringCchCat(szFile, MAX_PATH, L"\\");//EX: dir\*.*\ 
-        StringCchCat(szFile, MAX_PATH, wFindFileData.cFileName);//EX: dir\*.*\file
-
-        if (wFindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) //如果找到的是目錄
+        __try
         {
-            DeleteDir(szFile, ++DeleteRootPath); //進入目錄進行遞迴
-            RemoveDirectoryW(szFile);//資料夾內檔案清除後移除目錄
-            DeleteRootPath--;
-        }
-        else //找到的是檔案
-        {
-            DeleteFileW(szFile);//清除
-        }
-    } while (FindNextFileW(hFind, &wFindFileData));
+            t_szAllocLen = wcslen(p_PathPtr) + MAX_PATH + 1;//EX: size = 263 (題目(2) + 260 + 1)
+            t_FileNamePtr = new WCHAR[t_szAllocLen];
+            wcscpy_s(t_FileNamePtr, t_szAllocLen, p_PathPtr);
 
-    //移除目標根目錄
-    if (DeleteRootPath > 0)
-    {
-        RemoveDirectoryW(dir);
+            t_PosPtr = wcsrchr(t_FileNamePtr, L'\\');//字串中尋找 '\'字元所在位置
+            if (t_PosPtr != NULL && t_PosPtr[1] == NULL)
+                t_PosPtr[0] = NULL;
+
+            wcscat_s(t_FileNamePtr, t_szAllocLen, L"\\*.*");//EX:題目\*.* 
+            t_hFindHandle = ::FindFirstFileW(t_FileNamePtr, &t_FindFileData);
+
+            if (t_hFindHandle == INVALID_HANDLE_VALUE)//文件查找失敗
+                __leave;
+
+            wcscpy_s(t_FileNamePtr, t_szAllocLen, p_PathPtr);//EX:題目
+            t_PosPtr = wcsrchr(t_FileNamePtr, L'\\');//字串中尋找 '\'字元所在位置
+            if (t_PosPtr != NULL && t_PosPtr[1] == NULL)
+                t_PosPtr[1] = NULL;
+
+            do
+            {
+                if (t_FindFileData.cFileName[0] == NULL)
+                    break;
+                if (t_FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                {
+                    if (!wcscmp(t_FindFileData.cFileName, L"."))
+                        continue;
+                    if (!wcscmp(t_FindFileData.cFileName, L".."))
+                        continue;
+                    swprintf_s(t_FileNamePtr, t_szAllocLen, L"%s\\%s", p_PathPtr, t_FindFileData.cFileName);
+                    ::DeleteDir(t_FileNamePtr);
+                }
+                else
+                {
+                    swprintf_s(t_FileNamePtr, t_szAllocLen, L"%s\\%s", p_PathPtr, t_FindFileData.cFileName);
+                    ::DeleteFileW(t_FileNamePtr);
+                }
+            } while (::FindNextFileW(t_hFindHandle, &t_FindFileData));
+            ::RemoveDirectoryW(p_PathPtr);
+        }
+        __finally
+        {
+            if (t_FileNamePtr != NULL)
+                delete[] t_FileNamePtr;
+            t_FileNamePtr = NULL;
+            if (t_hFindHandle != INVALID_HANDLE_VALUE)
+                ::FindClose(t_hFindHandle);
+            t_hFindHandle = INVALID_HANDLE_VALUE;
+        }
     }
+    __except (1)
+    {
 
-    FindClose(hFind);//關閉檔案句柄
+    }
 }
